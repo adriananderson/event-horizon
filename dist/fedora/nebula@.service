@@ -1,10 +1,12 @@
 [Unit]
-Description=Nebula Mesh VPN
-Wants=basic.target network-online.target
+Description=Nebula overlay networking tool, for %I
+
 After=basic.target network.target network-online.target
+Before=sshd.service
+Wants=basic.target network-online.target
 
 [Service]
-WorkingDirectory=/etc/nebula
+WorkingDirectory=/etc/nebula/%i
 ExecReload=/bin/kill -HUP $MAINPID
 ExecStart=/usr/bin/nebula -config config.yml
 Restart=always

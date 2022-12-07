@@ -1,11 +1,10 @@
 [Unit]
-Description=Nebula Mesh VPN
+Description=Nebula Mesh VPN for %I
 Wants=basic.target
 After=basic.target network.target
-Before=sshd.service
 
 [Service]
-WorkingDirectory=/etc/nebula
+WorkingDirectory=/etc/nebula/%i
 ExecReload=/bin/kill -HUP $MAINPID
 ExecStart=/usr/local/bin/nebula -config config.yml
 Restart=always
