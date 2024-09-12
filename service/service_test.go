@@ -13,10 +13,10 @@ import (
 	"github.com/slackhq/nebula/config"
 	"github.com/slackhq/nebula/e2e"
 	"golang.org/x/sync/errgroup"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
-type m map[string]interface{}
+type m = map[string]any
 
 func newSimpleService(caCrt *cert.NebulaCertificate, caKey []byte, name string, udpIp netip.Addr, overrides m) *Service {
 	_, _, myPrivKey, myPEM := e2e.NewTestCert(caCrt, caKey, "a", time.Now(), time.Now().Add(5*time.Minute), netip.PrefixFrom(udpIp, 24), nil, []string{})

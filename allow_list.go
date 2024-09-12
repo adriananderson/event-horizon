@@ -82,7 +82,7 @@ func newAllowListFromConfig(c *config.C, k string, handleKey func(key string, va
 // If the handleKey func returns true, the rest of the parsing is skipped
 // for this key. This allows parsing of special values like `interfaces`.
 func newAllowList(k string, raw interface{}, handleKey func(key string, value interface{}) (bool, error)) (*AllowList, error) {
-	rawMap, ok := raw.(map[interface{}]interface{})
+	rawMap, ok := raw.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("config `%s` has invalid type: %T", k, raw)
 	}
@@ -100,12 +100,7 @@ func newAllowList(k string, raw interface{}, handleKey func(key string, value in
 	rules4 := allowListRules{firstValue: true, allValuesMatch: true, defaultSet: false}
 	rules6 := allowListRules{firstValue: true, allValuesMatch: true, defaultSet: false}
 
-	for rawKey, rawValue := range rawMap {
-		rawCIDR, ok := rawKey.(string)
-		if !ok {
-			return nil, fmt.Errorf("config `%s` has invalid key (type %T): %v", k, rawKey, rawKey)
-		}
-
+	for rawCIDR, rawValue := range rawMap {
 		if handleKey != nil {
 			handled, err := handleKey(rawCIDR, rawValue)
 			if err != nil {
@@ -116,7 +111,7 @@ func newAllowList(k string, raw interface{}, handleKey func(key string, value in
 			}
 		}
 
-		value, ok := rawValue.(bool)
+		value, ok := config.AsBool(rawValue)
 		if !ok {
 			return nil, fmt.Errorf("config `%s` has invalid value (type %T): %v", k, rawValue, rawValue)
 		}
@@ -177,19 +172,15 @@ func newAllowList(k string, raw interface{}, handleKey func(key string, value in
 func getAllowListInterfaces(k string, v interface{}) ([]AllowListNameRule, error) {
 	var nameRules []AllowListNameRule
 
-	rawRules, ok := v.(map[interface{}]interface{})
+	rawRules, ok := v.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("config `%s.interfaces` is invalid (type %T): %v", k, v, v)
 	}
 
 	firstEntry := true
 	var allValues bool
-	for rawName, rawAllow := range rawRules {
-		name, ok := rawName.(string)
-		if !ok {
-			return nil, fmt.Errorf("config `%s.interfaces` has invalid key (type %T): %v", k, rawName, rawName)
-		}
-		allow, ok := rawAllow.(bool)
+	for name, rawAllow := range rawRules {
+		allow, ok := config.AsBool(rawAllow)
 		if !ok {
 			return nil, fmt.Errorf("config `%s.interfaces` has invalid value (type %T): %v", k, rawAllow, rawAllow)
 		}
@@ -225,16 +216,11 @@ func getRemoteAllowRanges(c *config.C, k string) (*bart.Table[*AllowList], error
 
 	remoteAllowRanges := new(bart.Table[*AllowList])
 
-	rawMap, ok := value.(map[interface{}]interface{})
+	rawMap, ok := value.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("config `%s` has invalid type: %T", k, value)
 	}
-	for rawKey, rawValue := range rawMap {
-		rawCIDR, ok := rawKey.(string)
-		if !ok {
-			return nil, fmt.Errorf("config `%s` has invalid key (type %T): %v", k, rawKey, rawKey)
-		}
-
+	for rawCIDR, rawValue := range rawMap {
 		allowList, err := newAllowList(fmt.Sprintf("%s.%s", k, rawCIDR), rawValue, nil)
 		if err != nil {
 			return nil, err
