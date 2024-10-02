@@ -8,6 +8,7 @@ import (
 	"github.com/slackhq/nebula/header"
 	"github.com/slackhq/nebula/iputil"
 	"github.com/slackhq/nebula/noiseutil"
+	"github.com/slackhq/nebula/udp"
 )
 
 func (f *Interface) consumeInsidePacket(packet []byte, fwPacket *firewall.Packet, nb, out []byte, q int, localCache firewall.ConntrackCache) {
@@ -65,7 +66,7 @@ func (f *Interface) consumeInsidePacket(packet []byte, fwPacket *firewall.Packet
 
 	dropReason := f.firewall.Drop(*fwPacket, false, hostinfo, f.pki.GetCAPool(), localCache)
 	if dropReason == nil {
-		f.sendNoMetrics(header.Message, 0, hostinfo.ConnectionState, hostinfo, netip.AddrPort{}, packet, nb, out, q)
+		f.sendNoMetrics(header.Message, 0, hostinfo.ConnectionState, hostinfo, netip.AddrPort{}, packet, nb, out, q, fwPacket)
 
 	} else {
 		f.rejectInside(packet, out, q)
@@ -114,7 +115,7 @@ func (f *Interface) rejectOutside(packet []byte, ci *ConnectionState, hostinfo *
 		return
 	}
 
-	f.sendNoMetrics(header.Message, 0, ci, hostinfo, netip.AddrPort{}, out, nb, packet, q)
+	f.sendNoMetrics(header.Message, 0, ci, hostinfo, netip.AddrPort{}, out, nb, packet, q, nil)
 }
 
 func (f *Interface) Handshake(vpnIp netip.Addr) {
@@ -153,7 +154,7 @@ func (f *Interface) sendMessageNow(t header.MessageType, st header.MessageSubTyp
 		return
 	}
 
-	f.sendNoMetrics(header.Message, st, hostinfo.ConnectionState, hostinfo, netip.AddrPort{}, p, nb, out, 0)
+	f.sendNoMetrics(header.Message, st, hostinfo.ConnectionState, hostinfo, netip.AddrPort{}, p, nb, out, 0, nil)
 }
 
 // SendMessageToVpnIp handles real ip:port lookup and sends to the current best known address for vpnIp
@@ -183,12 +184,12 @@ func (f *Interface) SendMessageToHostInfo(t header.MessageType, st header.Messag
 
 func (f *Interface) send(t header.MessageType, st header.MessageSubType, ci *ConnectionState, hostinfo *HostInfo, p, nb, out []byte) {
 	f.messageMetrics.Tx(t, st, 1)
-	f.sendNoMetrics(t, st, ci, hostinfo, netip.AddrPort{}, p, nb, out, 0)
+	f.sendNoMetrics(t, st, ci, hostinfo, netip.AddrPort{}, p, nb, out, 0, nil)
 }
 
 func (f *Interface) sendTo(t header.MessageType, st header.MessageSubType, ci *ConnectionState, hostinfo *HostInfo, remote netip.AddrPort, p, nb, out []byte) {
 	f.messageMetrics.Tx(t, st, 1)
-	f.sendNoMetrics(t, st, ci, hostinfo, remote, p, nb, out, 0)
+	f.sendNoMetrics(t, st, ci, hostinfo, remote, p, nb, out, 0, nil)
 }
 
 // SendVia sends a payload through a Relay tunnel. No authentication or encryption is done
@@ -256,11 +257,28 @@ func (f *Interface) SendVia(via *HostInfo,
 	f.connectionManager.RelayUsed(relay.LocalIndex)
 }
 
-func (f *Interface) sendNoMetrics(t header.MessageType, st header.MessageSubType, ci *ConnectionState, hostinfo *HostInfo, remote netip.AddrPort, p, nb, out []byte, q int) {
+func (f *Interface) sendNoMetrics(t header.MessageType, st header.MessageSubType, ci *ConnectionState, hostinfo *HostInfo, remote netip.AddrPort, p, nb, out []byte, q int, udpPortGetter udp.SendPortGetter) {
 	if ci.eKey == nil {
 		//TODO: log warning
 		return
 	}
+
+	multiport := f.multiPort.Tx && hostinfo.multiportTx
+	rawOut := out
+	if multiport {
+		if len(out) < udp.RawOverhead {
+			// NOTE: This is because some spots in the code send us `out[:0]`, so
+			// we need to expand the slice back out to get our 8 bytes back.
+			out = out[:udp.RawOverhead]
+		}
+		// Preserve bytes needed for the raw socket
+		out = out[udp.RawOverhead:]
+
+		if udpPortGetter == nil {
+			udpPortGetter = udp.RandomSendPort
+		}
+	}
+
 	useRelay := !remote.IsValid() && !hostinfo.remote.IsValid()
 	fullOut := out
 
@@ -310,13 +328,25 @@ func (f *Interface) sendNoMetrics(t header.MessageType, st header.MessageSubType
 	}
 
 	if remote.IsValid() {
-		err = f.writers[q].WriteTo(out, remote)
+		if multiport {
+			rawOut = rawOut[:len(out)+udp.RawOverhead]
+			port := udpPortGetter.UDPSendPort(f.multiPort.TxPorts)
+			err = f.udpRaw.WriteTo(rawOut, port, remote)
+		} else {
+			err = f.writers[q].WriteTo(out, remote)
+		}
 		if err != nil {
 			hostinfo.logger(f.l).WithError(err).
 				WithField("udpAddr", remote).Error("Failed to write outgoing packet")
 		}
 	} else if hostinfo.remote.IsValid() {
-		err = f.writers[q].WriteTo(out, hostinfo.remote)
+		if multiport {
+			rawOut = rawOut[:len(out)+udp.RawOverhead]
+			port := udpPortGetter.UDPSendPort(f.multiPort.TxPorts)
+			err = f.udpRaw.WriteTo(rawOut, port, hostinfo.remote)
+		} else {
+			err = f.writers[q].WriteTo(out, hostinfo.remote)
+		}
 		if err != nil {
 			hostinfo.logger(f.l).WithError(err).
 				WithField("udpAddr", remote).Error("Failed to write outgoing packet")
