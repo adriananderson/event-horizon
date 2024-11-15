@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/ecdh"
+	"crypto/elliptic"
 	"crypto/rand"
 	"errors"
 	"flag"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/skip2/go-qrcode"
 	"github.com/slackhq/nebula/cert"
+	"github.com/slackhq/nebula/noiseutil"
 	"github.com/slackhq/nebula/pkclient"
 	"golang.org/x/crypto/curve25519"
 )
@@ -400,7 +402,7 @@ func newKeypair(curve cert.Curve) ([]byte, []byte) {
 	case cert.Curve_CURVE25519:
 		return x25519Keypair()
 	case cert.Curve_P256:
-		return p256Keypair()
+		return p256Keypair(false) //todo support generating compressed keys
 	default:
 		return nil, nil
 	}
@@ -420,13 +422,22 @@ func x25519Keypair() ([]byte, []byte) {
 	return pubkey, privkey
 }
 
-func p256Keypair() ([]byte, []byte) {
+func p256Keypair(compressed bool) ([]byte, []byte) {
 	privkey, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
 		panic(err)
 	}
-	pubkey := privkey.PublicKey()
-	return pubkey.Bytes(), privkey.Bytes()
+	if !compressed {
+		pubkey := privkey.PublicKey()
+		return pubkey.Bytes(), privkey.Bytes()
+	}
+	pubkeyBytes := privkey.PublicKey().Bytes()
+	pubkey, err := noiseutil.LoadP256Pubkey(pubkeyBytes)
+	if err != nil {
+		panic(err)
+	}
+	out := elliptic.MarshalCompressed(elliptic.P256(), pubkey.X, pubkey.Y)
+	return out, privkey.Bytes()
 }
 
 func signSummary() string {
