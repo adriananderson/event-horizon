@@ -334,14 +334,8 @@ func (nc *certificateV1) Copy() Certificate {
 	copy(c.signature, nc.signature)
 	copy(c.details.Groups, nc.details.Groups)
 	copy(c.details.PublicKey, nc.details.PublicKey)
-
-	for i, p := range nc.details.Ips {
-		c.details.Ips[i] = p
-	}
-
-	for i, p := range nc.details.Subnets {
-		c.details.Subnets[i] = p
-	}
+	copy(c.details.Ips, nc.details.Ips)
+	copy(c.details.Subnets, nc.details.Subnets)
 
 	return c
 }
